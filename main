@@ -1,0 +1,168 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch_geometric.nn import GCNConv
+import timeit
+import warnings
+warnings.filterwarnings("ignore")
+from tqdm import tqdm
+import numpy as np
+import torch.nn.functional as F
+from torch_geometric.utils import dense_to_sparse, k_hop_subgraph
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from datetime import datetime
+from torch_geometric.nn import SSGConv
+
+def load_XA(dataset, datadir):
+    import scipy.sparse as sp
+    A = sp.load_npz(f"{datadir}/{dataset}_A.npy" if datadir else f"{dataset}_A.npy")
+    X = sp.load_npz(f"{datadir}/{dataset}_X.npy" if datadir else f"{dataset}_X.npy")
+    return A.toarray(), X.toarray()
+
+def load_labels(dataset, datadir):
+    labels = np.load(f"{datadir}/{dataset}_labels.npy" if datadir else f"{dataset}_labels.npy")
+    return labels
+
+def load_ckpt(dataset, datadir):
+    try:
+        return torch.load(f"{datadir}/{dataset}.pth.tar" if datadir else f"{dataset}.pth.tar",
+                          map_location=torch.device('cpu'))
+    except FileNotFoundError:
+        return {'model_state': None}
+
+def get_nodes_explained(dataset, A_np):
+    node_list = np.arange(10)
+    k = 5
+    return node_list, k
+
+class TeacherGCN(nn.Module):
+    def __init__(self, nfeat, nclass):
+        super(TeacherGCN, self).__init__()
+        self.conv1 = GCNConv(nfeat, nclass)
+        self.conv2 = GCNConv(nclass, 128)
+        self.conv3 = GCNConv(128, nclass)
+        self.intermediate_features = {}
+
+    def forward(self, x, edge_index):
+        self.intermediate_features = {}
+        x1 = self.conv1(x, edge_index)
+        x1 = F.relu(x1)
+        x1 = F.dropout(x1, p=0.5, training=self.training)
+        self.intermediate_features['conv1'] = x1
+        x2 = self.conv2(x1, edge_index)
+        x2 = F.relu(x2)
+        x2 = F.dropout(x2, p=0.5, training=self.training)
+        self.intermediate_features['conv2'] = x2
+        x3 = self.conv3(x2, edge_index)
+        self.intermediate_features['conv3'] = x3
+        return x3
+
+    def get_intermediate_features(self):
+        return self.intermediate_features
+
+class LayerwiseDistillationLoss(nn.Module):
+    def __init__(self, temp=3.0):
+        super().__init__()
+        self.temp = temp
+        self.mse = nn.MSELoss()
+        self.kl_div = nn.KLDivLoss(reduction='batchmean')
+
+    def forward(self, student_output, teacher_output, student_intermediate, teacher_intermediate, labels=None):
+        t_out_soft = F.softmax(teacher_output / self.temp, dim=1)
+        s_out_soft = F.log_softmax(student_output / self.temp, dim=1)
+        kl_loss = self.kl_div(s_out_soft, t_out_soft) * (self.temp ** 2)
+
+        layer_loss = 0.0
+        layer_count = 0
+        for key in teacher_intermediate.keys():
+            if key in student_intermediate:
+                s_feat = student_intermediate[key]
+                t_feat = teacher_intermediate[key]
+                layer_loss += self.mse(s_feat, t_feat)
+                layer_count += 1
+        layer_loss = layer_loss / layer_count if layer_count > 0 else 0.0
+
+        task_loss = 0.0
+        if labels is not None:
+            task_loss = F.cross_entropy(student_output, labels)
+
+        total_loss = 0.3 * task_loss + 0.4 * kl_loss + 0.3 * layer_loss
+        return total_loss
+
+class SSGCStudent(nn.Module):
+    def __init__(self, k, nfeat, nclass):
+        super(SSGCStudent, self).__init__()
+        self.k = k
+        self.conv1 = SSGConv(nfeat, nclass, k)
+        self.intermediate_features = {}
+
+    def forward(self, x, edge_index):
+        self.intermediate_features = {}
+        x = self.conv1(x, edge_index)
+        self.intermediate_features['conv1'] = x
+        return x
+
+    def get_intermediate_features(self):
+        return self.intermediate_features
+
+class DynamicLayerwiseDistillationLoss(nn.Module):
+    def __init__(self, temp=3.0, dynamic_strategy='loss_scaling', num_epochs=100):
+        super().__init__()
+        self.temp = temp
+        self.mse = nn.MSELoss()
+        self.kl_div = nn.KLDivLoss(reduction='batchmean')
+        self.dynamic_strategy = dynamic_strategy
+        self.num_epochs = num_epochs
+        self.task_loss_history = []
+        self.kl_loss_history = []
+        self.layer_loss_history = []
+        self.similarity_threshold = 0.1
+        self.epsilon = 1e-8
+
+    def _compute_cosine_similarity(self, s_feat, t_feat):
+        s_norm = F.normalize(s_feat, dim=1)
+        t_norm = F.normalize(t_feat, dim=1)
+        similarity = torch.mean(torch.sum(s_norm * t_norm, dim=1))
+        return similarity
+    def _get_dynamic_weights(self, task_loss, kl_loss, layer_loss, epoch, student_intermediate, teacher_intermediate):
+
+        avg_similarity = 0.0
+        count = 0
+        for key in teacher_intermediate.keys():
+            if key in student_intermediate:
+                s_feat = student_intermediate[key]
+                t_feat = teacher_intermediate[key]
+                avg_similarity += self._compute_cosine_similarity(s_feat, t_feat)
+                count += 1
+        avg_similarity = avg_similarity / count if count > 0 else 0.0
+
+        w_layer = max(0.1, 1 - avg_similarity / (self.similarity_threshold + self.epsilon))
+        w_kl = 0.4
+        w_task = 1 - w_kl - w_layer
+        total = w_task + w_kl + w_layer
+        w_task /= total
+        w_kl /= total
+        w_layer /= total
+        return w_task, w_kl, w_layer
+
+    def forward(self, student_output, teacher_output, student_intermediate, teacher_intermediate, labels=None, epoch=0):
+        t_out_soft = F.softmax(teacher_output / self.temp, dim=1)
+        s_out_soft = F.log_softmax(student_output / self.temp, dim=1)
+        kl_loss = self.kl_div(s_out_soft, t_out_soft) * (self.temp ** 2)
+        layer_loss = 0.0
+        layer_count = 0
+        for key in teacher_intermediate.keys():
+            if key in student_intermediate:
+                s_feat = student_intermediate[key]
+                t_feat = teacher_intermediate[key]
+                layer_loss += self.mse(s_feat, t_feat)
+                layer_count += 1
+        layer_loss = layer_loss / layer_count if layer_count > 0 else 0.0
+        task_loss = 0.0
+        if labels is not None:
+            task_loss = F.cross_entropy(student_output, labels)
+        w_task, w_kl, w_layer = self._get_dynamic_weights(
+            task_loss, kl_loss, layer_loss, epoch, student_intermediate, teacher_intermediate
+        )
+        total_loss = w_task * task_loss + w_kl * kl_loss + w_layer * layer_loss
+        return total_loss
