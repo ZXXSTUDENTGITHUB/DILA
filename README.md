@@ -16,7 +16,7 @@ Graph Neural Networks (GNNs) have made significant strides in the analysis and m
 - **Linear Student Model**: Employing an SGC-based linear model as the student, which is inherently interpretable
 - **Efficient Explanation Generation**: Leveraging the linear properties of the student model to rapidly generate node explanations through feature perturbation
 
-## 🔧 Environment Setup
+## Environment Setup
 
 ### Requirements
 
