@@ -83,12 +83,12 @@ iterations = 3            # Number of experiment repetitions
 
 | Dataset | Description | #Nodes | Ground Truth |
 |---------|-------------|--------|--------------|
-| syn1 (BA-Shapes) | BA graph + House motif | 700 | 5-node house |
-| syn2 (BA-Community) | Dual BA community graph | 1400 | 5-node house |
-| syn3 (Tree-Cycles) | 8-level tree + Cycle motif | 1020 | 9-node cycle |
-| syn4 (Tree-Grid) | 8-level tree + Grid motif | 871 | 6-node grid |
-| syn5 (BA-Bottle) | BA graph + Bottle motif | 1231 | 9-node bottle |
-| syn6 (BA-2Motifs) | BA graph + Dual House motif | 700 | 5-node house |
+| BA-Shapes | BA graph + House motif | 700 | 5-node house |
+| BA-Community | Dual BA community graph | 1400 | 5-node house |
+| Tree-Cycles | 8-level tree + Cycle motif | 1020 | 9-node cycle |
+| Tree-Grid | 8-level tree + Grid motif | 871 | 6-node grid |
+| BA-Bottle | BA graph + Bottle motif | 1231 | 9-node bottle |
+| BA-2Motifs | BA graph + Dual House motif | 700 | 5-node house |
 
 ### Real-World Datasets
 
