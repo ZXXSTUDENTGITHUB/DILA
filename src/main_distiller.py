@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from tqdm.notebook import tqdm
 
 from .model import (
-    SGC,
+    SSGC,
     TeacherGCN,
     StudentModel,
     criterion_inter_layer,
@@ -276,7 +276,7 @@ def main(
 
         X, A, edge_index, L_model = database
 
-        model = SGC(layer, input_dim, num_class).to(device)
+        model = SSGC(layer, input_dim, num_class).to(device)
         X = X.to(device)
         edge_index = edge_index.to(device)
         L_model = L_model.to(device)
