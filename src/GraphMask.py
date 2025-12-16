@@ -182,34 +182,3 @@ current_time2 = datetime.now()
 total_time = current_time2 - current_time1
 total_milliseconds = int(total_time.total_seconds() * 1000)
 print("总时间（毫秒）：", total_milliseconds)
-# target = labels
-# # Train against a variety of node-level or graph-level predictions:
-# for epoch in range(30):
-#     for i in range(len(index)):
-#         current_index = index[i].item()# Indices to train against.
-#         loss = explainer.algorithm.train(epoch, gnn_model, X, edge_index,
-#                                          target=target, index=current_index)
-#         print(f'epoch:{epoch}, index:{current_index}, loss:{loss} ')
-# # for i in range(len(index)):
-# #     explanation = explainer(X, edge_index, target=target, index=i)
-# #     fid_pm = fidelity(explainer, explanation)
-# #     print(f'index:{i}, fid_pm:{fid_pm}')
-# # Get the final explanations:
-# # pred_prob = explainer.get_masked_prediction(X, edge_index)
-# # pred_mask = torch.max(pred_prob, dim=1)[0]
-# #
-# # target_mask = labels
-# # target_mask = target_mask.to('cuda:0')
-# #
-# # accuracy = groundtruth_metrics(pred_mask, target_mask, metrics=["accuracy"])
-# #
-# # print(accuracy)
-#
-# prediction = explainer.get_masked_prediction(X, edge_index)
-# target_mask = explainer.get_target(prediction)
-#
-# target_mask_cpu = target_mask.cpu().numpy()
-# labels_cpu = labels.cpu().numpy()
-#
-# # sklearn_accuracy = accuracy_score(target_mask_cpu, labels_cpu)
-# print(f"Accuracy (sklearn): {sklearn_accuracy:.4f}")
